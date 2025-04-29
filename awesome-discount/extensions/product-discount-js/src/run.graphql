@@ -1,0 +1,34 @@
+query RunInput($namespace: String!, $key: String!) {
+  cart {
+    lines {
+      quantity
+      merchandise {
+        __typename
+        ... on ProductVariant {
+          id
+        }
+      }
+    }
+    buyerIdentity {
+      customer {
+        id
+        hasAnyTag(tags: ["VIP", "wholesale"])
+        hasTags(tags: ["VIP", "wholesale"]) {
+          tag
+          hasTag
+        }
+        email
+        numberOfOrders
+        amountSpent {
+          amount
+          currencyCode
+        }
+      }
+    }
+  }
+  discountNode {
+    metafield(namespace: $namespace, key: $key) {
+      value
+    }
+  }
+}
