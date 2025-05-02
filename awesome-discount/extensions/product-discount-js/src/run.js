@@ -20,22 +20,74 @@ const EMPTY_DISCOUNT = {
 // Maximum combined discount percentage allowed
 const MAX_COMBINED_DISCOUNT = 50;
 
-// Volume discount tiers
-const VOLUME_DISCOUNTS = [
-  { itemCount: 5, percentage: 30 },
-  { itemCount: 4, percentage: 25 },
-  { itemCount: 3, percentage: 20 },
-  { itemCount: 2, percentage: 15 },
-];
+// Default Buy X Get Y discount (used only if no configuration is provided)
+const DEFAULT_BUY_X_GET_Y = {
+  buyQuantity: 2,
+  getQuantity: 1,
+  discountPercentage: 100, // 100% discount means free item
+  enabled: true
+};
 
 /**
- * Calculate volume-based discount based on item count
- * @param {number} itemCount Total number of items in cart
- * @returns {number} Applicable volume discount percentage
+ * Calculate Buy X Get Y discount for cart items
+ * @param {Object} cart The shopping cart
+ * @param {Object} buyXGetYConfig The Buy X Get Y configuration
+ * @returns {Object} Discount information including targets and percentage
  */
-function calculateVolumeDiscount(itemCount) {
-  const applicableTier = VOLUME_DISCOUNTS.find(tier => itemCount >= tier.itemCount);
-  return applicableTier ? applicableTier.percentage : 0;
+function calculateBuyXGetYDiscount(cart, buyXGetYConfig) {
+  // If Buy X Get Y is not enabled, return empty result
+  if (!buyXGetYConfig || !buyXGetYConfig.enabled) {
+    return { applicable: false };
+  }
+  
+  const { buyQuantity, getQuantity, discountPercentage } = buyXGetYConfig;
+  
+  // Get all product variants from cart
+  const variants = cart.lines
+    .filter(line => line.merchandise.__typename === 'ProductVariant')
+    .map(line => ({
+      id: line.merchandise.id,
+      quantity: line.quantity,
+      price: parseFloat(line.cost.amountPerQuantity.amount),
+      title: line.merchandise.product.title
+    }));
+  
+  // If not enough items in cart, no discount applies
+  const totalItems = variants.reduce((sum, variant) => sum + variant.quantity, 0);
+  if (totalItems < buyQuantity + getQuantity) {
+    return { 
+      applicable: false, 
+      message: `Add ${buyQuantity + getQuantity - totalItems} more item(s) to qualify for Buy ${buyQuantity} Get ${getQuantity} discount`
+    };
+  }
+  
+  // Sort variants by price (lowest first) to maximize customer benefit
+  const sortedVariants = [...variants].sort((a, b) => a.price - b.price);
+  
+  // Determine which items get the discount (the lowest priced ones)
+  let remainingDiscountItems = getQuantity;
+  const discountTargets = [];
+  
+  for (const variant of sortedVariants) {
+    if (remainingDiscountItems <= 0) break;
+    
+    const itemsToDiscount = Math.min(variant.quantity, remainingDiscountItems);
+    if (itemsToDiscount > 0) {
+      discountTargets.push({
+        id: variant.id,
+        quantity: itemsToDiscount,
+        title: variant.title
+      });
+      remainingDiscountItems -= itemsToDiscount;
+    }
+  }
+  
+  return {
+    applicable: discountTargets.length > 0,
+    targets: discountTargets,
+    percentage: discountPercentage,
+    message: `Buy ${buyQuantity} Get ${getQuantity} at ${discountPercentage}% off${discountPercentage === 100 ? ' (FREE)' : ''}`
+  };
 }
 
 /**
@@ -70,7 +122,7 @@ export function run(input) {
 
   // Parse the configuration from metafield
   const configuration = JSON.parse(
-    input?.discountNode?.metafield?.value ?? '{"tagDiscounts":{}}'
+    input?.discountNode?.metafield?.value ?? '{"tagDiscounts":{},"buyXGetY":' + JSON.stringify(DEFAULT_BUY_X_GET_Y) + '}'
   );
 
   console.log('Parsed configuration:', configuration);
@@ -78,29 +130,38 @@ export function run(input) {
   // Calculate total items in cart
   const totalItems = input.cart.lines.reduce((sum, line) => sum + (line.quantity || 0), 0);
   
-  // Calculate volume discount
-  const volumeDiscount = calculateVolumeDiscount(totalItems);
-  console.log('Volume discount for', totalItems, 'items:', volumeDiscount + '%');
+  // Calculate Buy X Get Y discount
+  const buyXGetYResult = calculateBuyXGetYDiscount(input.cart, configuration.buyXGetY);
+  console.log('Buy X Get Y discount result:', buyXGetYResult);
 
   // Get customer from cart
   const customer = input.cart.buyerIdentity?.customer;
   
-  // Initialize discounts array with volume discount if applicable
-  const applicableDiscounts = volumeDiscount > 0 ? [volumeDiscount] : [];
-  const discountMessages = volumeDiscount > 0 ? [`${volumeDiscount}% volume discount`] : [];
+  // Initialize discounts array with tag discounts only (Buy X Get Y is handled separately)
+  const applicableDiscounts = [];
+  const discountMessages = [];
+  
+  // Get message for Buy X Get Y discount if not applicable
+  let nextTierMessage = '';
+  if (!buyXGetYResult.applicable && buyXGetYResult.message) {
+    nextTierMessage = ` (${buyXGetYResult.message})`;
+  }
   
   // Process tag-based discounts if customer exists
   if (customer && configuration.tagDiscounts) {
     // Get customer tags that are active
     const customerTags = (customer.hasTags || [])
-      .filter(tagInfo => tagInfo.hasTag)
-      .map(tagInfo => tagInfo.tag);
+      .filter(tagInfo => tagInfo && tagInfo.hasTag)
+      .map(tagInfo => tagInfo.tag || '');
     console.log('Customer active tags:', customerTags);
 
     // Check each customer tag against our configuration
     customerTags.forEach(tag => {
-      const tagPercentageKey = `${tag}Percentage`;
-      const tagDiscount = configuration.tagDiscounts[tagPercentageKey];
+      // Skip empty tags
+      if (!tag) return;
+      
+      // Direct lookup by tag name (new format)
+      const tagDiscount = configuration.tagDiscounts[tag];
       if (tagDiscount && tagDiscount > 0) {
         applicableDiscounts.push(tagDiscount);
         discountMessages.push(`${tag} (${tagDiscount}%)`);
@@ -108,8 +169,8 @@ export function run(input) {
     });
   }
 
-  // If no discounts found, return empty discount
-  if (applicableDiscounts.length === 0) {
+  // If no tag discounts and Buy X Get Y is not applicable, return empty discount
+  if (applicableDiscounts.length === 0 && !buyXGetYResult.applicable) {
     console.log('No valid discounts found');
     return EMPTY_DISCOUNT;
   }
@@ -118,47 +179,73 @@ export function run(input) {
   const effectiveDiscount = calculateCombinedDiscount(applicableDiscounts);
   console.log('Effective combined discount:', effectiveDiscount, 'Messages:', discountMessages);
 
-  // Apply discount to all items in cart
-  const targets = input.cart.lines
-    .filter(line => line.merchandise.__typename === 'ProductVariant')
-    .map(line => {
-      const variant = /** @type {ProductVariant} */ (line.merchandise);
-      return /** @type {Target} */ ({
-        productVariant: {
-          id: variant.id,
+  // Prepare discounts array
+  let discounts = [];
+  
+  // Handle Buy X Get Y discount if applicable
+  if (buyXGetYResult.applicable) {
+    // Add Buy X Get Y discount targets
+    const buyXGetYTargets = buyXGetYResult.targets.map(target => ({
+      productVariant: {
+        id: target.id,
+        quantity: target.quantity
+      }
+    }));
+    
+    if (buyXGetYTargets.length > 0) {
+      discounts.push({
+        targets: buyXGetYTargets,
+        value: {
+          percentage: {
+            value: buyXGetYResult.percentage.toString()
+          }
         },
+        message: buyXGetYResult.message
       });
-    });
-
-  if (!targets.length) {
+    }
+  }
+  
+  // Handle tag-based discounts if applicable
+  if (applicableDiscounts.length > 0) {
+    // Apply tag-based discounts to all items in cart
+    const tagDiscountTargets = input.cart.lines
+      .filter(line => line.merchandise.__typename === 'ProductVariant')
+      .map(line => {
+        const variant = /** @type {ProductVariant} */ (line.merchandise);
+        return /** @type {Target} */ ({
+          productVariant: {
+            id: variant.id,
+          },
+        });
+      });
+    
+    if (tagDiscountTargets.length > 0) {
+      // Calculate combined tag discount
+      const effectiveTagDiscount = calculateCombinedDiscount(applicableDiscounts);
+      
+      discounts.push({
+        targets: tagDiscountTargets,
+        value: {
+          percentage: {
+            value: effectiveTagDiscount.toString()
+          }
+        },
+        message: `Tag discounts: ${discountMessages.join(' + ')}${nextTierMessage}`
+      });
+    }
+  }
+  
+  if (discounts.length === 0) {
     console.log('No valid targets found');
     return EMPTY_DISCOUNT;
   }
 
-  // Calculate remaining items needed for next tier
-  let nextTierMessage = '';
-  if (volumeDiscount < VOLUME_DISCOUNTS[0].percentage) {
-    const nextTier = VOLUME_DISCOUNTS.find(tier => tier.itemCount > totalItems);
-    if (nextTier) {
-      const itemsNeeded = nextTier.itemCount - totalItems;
-      nextTierMessage = ` (Add ${itemsNeeded} more item${itemsNeeded > 1 ? 's' : ''} for ${nextTier.percentage}% off)`;
-    }
-  }
+  // nextTierMessage is already defined above
 
-  console.log('Applying discount to targets:', targets);
+  console.log('Applying discounts:', discounts);
 
   return {
-    discounts: [
-      {
-        targets,
-        value: {
-          percentage: {
-            value: effectiveDiscount.toString(),
-          },
-        },
-        message: `Combined discount: ${discountMessages.join(' + ')}${nextTierMessage}`,
-      },
-    ],
+    discounts: discounts,
     discountApplicationStrategy: DiscountApplicationStrategy.All,
   };
 }

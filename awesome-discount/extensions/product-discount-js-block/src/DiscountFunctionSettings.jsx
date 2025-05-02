@@ -6,7 +6,6 @@ import {
   NumberField,
   Box,
   BlockStack,
-  Card,
   InlineStack,
   Button,
   Icon,
@@ -21,42 +20,94 @@ import { useState, useEffect } from 'react';
 // The target used here must match the target used in the extension toml file
 const TARGET = 'admin.discount-details.function-settings.render';
 
-// Volume discount tiers for display
-const VOLUME_DISCOUNTS = [
-  { itemCount: 5, percentage: 30 },
-  { itemCount: 4, percentage: 25 },
-  { itemCount: 3, percentage: 20 },
-  { itemCount: 2, percentage: 15 },
-];
+// Default Buy X Get Y discount (used only for new discounts)
+const DEFAULT_BUY_X_GET_Y = {
+  buyQuantity: 2,
+  getQuantity: 1,
+  discountPercentage: 100, // 100% discount means free item
+  enabled: true
+};
 
 // Maximum additional tag-based discount
 const MAX_TAG_DISCOUNT = 100;
 
-// Maximum combined discount
-const MAX_COMBINED_DISCOUNT = 100;
+// Maximum discount percentage
+const MAX_DISCOUNT_PERCENTAGE = 100;
 
-function VolumeDiscountInfo() {
+function BuyXGetYDiscountManager({ buyXGetY, setBuyXGetY }) {
+  const handleBuyQuantityChange = (newValue) => {
+    setBuyXGetY({ ...buyXGetY, buyQuantity: newValue });
+  };
+
+  const handleGetQuantityChange = (newValue) => {
+    setBuyXGetY({ ...buyXGetY, getQuantity: newValue });
+  };
+
+  const handleDiscountPercentageChange = (newValue) => {
+    setBuyXGetY({ ...buyXGetY, discountPercentage: newValue });
+  };
+
+  const handleToggleEnabled = () => {
+    setBuyXGetY({ ...buyXGetY, enabled: !buyXGetY.enabled });
+  };
+
   return (
-    <Box padding="base">
+    <Box background="surface" border="base" borderRadius="base" padding="base">
       <BlockStack gap="base">
-        <Text variant="headingMd">Volume Discounts (Automatic)</Text>
-        <BlockStack gap="tight">
-          {VOLUME_DISCOUNTS.map(({ itemCount, percentage }, index) => (
-            <Text key={index}>• {itemCount}+ items: {percentage}% off</Text>
-          ))}
-        </BlockStack>
+        <InlineStack blockAlignment="center" inlineAlignment="space-between">
+          <Text variant="headingMd">Buy X Get Y Discount</Text>
+          <Button
+            variant={buyXGetY.enabled ? "primary" : "secondary"}
+            onPress={handleToggleEnabled}
+          >
+            {buyXGetY.enabled ? "Enabled" : "Disabled"}
+          </Button>
+        </InlineStack>
+        
+        <Text>Configure your Buy X Get Y discount:</Text>
+        
+        <InlineStack blockAlignment="center" gap="base">
+          <NumberField
+            label="Buy Quantity (X)"
+            value={buyXGetY.buyQuantity}
+            onChange={handleBuyQuantityChange}
+            min={1}
+            disabled={!buyXGetY.enabled}
+          />
+          <NumberField
+            label="Get Quantity (Y)"
+            value={buyXGetY.getQuantity}
+            onChange={handleGetQuantityChange}
+            min={1}
+            disabled={!buyXGetY.enabled}
+          />
+          <NumberField
+            label="Discount %"
+            value={buyXGetY.discountPercentage}
+            onChange={handleDiscountPercentageChange}
+            min={0}
+            max={MAX_DISCOUNT_PERCENTAGE}
+            suffix="%"
+            disabled={!buyXGetY.enabled}
+          />
+        </InlineStack>
+        
+        <Banner tone="info">
+          When customers buy {buyXGetY.buyQuantity} items, they'll get {buyXGetY.getQuantity} additional item(s) at {buyXGetY.discountPercentage}% off.
+          {buyXGetY.discountPercentage === 100 && " (Free)"}
+        </Banner>
       </BlockStack>
     </Box>
   );
 }
 
-function TagDiscountField({ tag, percentage, onPercentageChange, onRemove }) {
+function TagDiscountField({ tagId, tagName, percentage, onPercentageChange, onRemove }) {
   return (
     <Box padding="base">
       <InlineStack blockAlignment="center" inlineAlignment="space-between" gap="base">
         <TextField
           label="Tag"
-          value={tag}
+          value={tagName}
           disabled
         />
         <NumberField
@@ -68,7 +119,7 @@ function TagDiscountField({ tag, percentage, onPercentageChange, onRemove }) {
         <Button
           variant="tertiary"
           onPress={onRemove}
-          accessibilityLabel={`Remove ${tag} tag`}
+          accessibilityLabel="Remove tag"
         >
           <Icon source="removeMajor" />
         </Button>
@@ -83,6 +134,8 @@ function App() {
   const { applyMetafieldChange, query, data } = useApi(TARGET);
   const [loading, setLoading] = useState(false);
   const [tagDiscounts, setTagDiscounts] = useState([]);
+  const [nextTagId, setNextTagId] = useState(1);
+  const [buyXGetY, setBuyXGetY] = useState({...DEFAULT_BUY_X_GET_Y});
   const [availableTags, setAvailableTags] = useState([]);
   const [selectedTag, setSelectedTag] = useState('');
   const [error, setError] = useState('');
@@ -107,6 +160,7 @@ function App() {
         
         // Extract all tags from customers
         const allTags = response?.data?.customers?.edges?.reduce((acc, edge) => {
+          if (!edge || !edge.node) return acc;
           const customerTags = edge.node.tags || [];
           return [...acc, ...customerTags];
         }, []) || [];
@@ -149,13 +203,32 @@ function App() {
         
         const savedConfig = response?.data?.discountNode?.metafield?.value;
         if (savedConfig) {
-          const parsedConfig = JSON.parse(savedConfig);
-          if (parsedConfig.tagDiscounts) {
-            const loadedTags = Object.entries(parsedConfig.tagDiscounts).map(([key, value]) => ({
-              tag: key.replace('Percentage', ''),
-              percentage: value
-            }));
-            setTagDiscounts(loadedTags);
+          try {
+            const parsedConfig = JSON.parse(savedConfig);
+            if (parsedConfig.tagDiscounts && typeof parsedConfig.tagDiscounts === 'object') {
+              const loadedTags = [];
+              let idCounter = 1;
+              
+              // Process tag discounts from the saved configuration
+              Object.entries(parsedConfig.tagDiscounts).forEach(([tagName, percentage]) => {
+                if (tagName) {
+                  loadedTags.push({
+                    id: idCounter++,
+                    tagName: tagName,
+                    percentage: Number(percentage) || 0
+                  });
+                }
+              });
+              
+              setTagDiscounts(loadedTags);
+              setNextTagId(idCounter); // Update the next ID counter
+            }
+            if (parsedConfig.buyXGetY) {
+              setBuyXGetY(parsedConfig.buyXGetY);
+            }
+          } catch (parseError) {
+            console.error('Error parsing saved configuration:', parseError);
+            setError('Failed to parse saved configuration');
           }
         }
       } catch (error) {
@@ -168,53 +241,77 @@ function App() {
   }, [query, data?.discountNode?.id]);
 
   const handleAddTag = () => {
-    if (selectedTag && !tagDiscounts.find(td => td.tag === selectedTag)) {
-      setTagDiscounts([...tagDiscounts, { tag: selectedTag, percentage: 0 }]);
+    if (selectedTag && !tagDiscounts.find(td => td.tagName === selectedTag)) {
+      // Use numeric IDs instead of tag names as keys
+      setTagDiscounts([...tagDiscounts, { 
+        id: nextTagId,
+        tagName: selectedTag, 
+        percentage: 0 
+      }]);
+      setNextTagId(nextTagId + 1);
       setSelectedTag('');
     }
   };
 
-  const handleRemoveTag = (tagToRemove) => {
-    setTagDiscounts(tagDiscounts.filter(td => td.tag !== tagToRemove));
+  const handleRemoveTag = (tagId) => {
+    setTagDiscounts(tagDiscounts.filter(td => td.id !== tagId));
   };
 
-  const handlePercentageChange = (tag, newPercentage) => {
+  const handlePercentageChange = (tagId, newPercentage) => {
     if (newPercentage < 0 || newPercentage > MAX_TAG_DISCOUNT) {
       setError(`Tag discount percentage must be between 0 and ${MAX_TAG_DISCOUNT}`);
       return;
     }
     
     setTagDiscounts(tagDiscounts.map(td => 
-      td.tag === tag ? { ...td, percentage: newPercentage } : td
+      td.id === tagId ? { ...td, percentage: newPercentage } : td
     ));
     setError('');
   };
 
   const handleSave = async () => {
     try {
+      // Convert tag discounts to a simple object with tag names as keys
+      const tagDiscountObject = {};
+      
+      // Process each tag discount
+      tagDiscounts.forEach(item => {
+        if (item && item.tagName) {
+          // Store as tagName: percentage
+          tagDiscountObject[item.tagName] = Number(item.percentage) || 0;
+        }
+      });
+      
       const configuration = {
-        tagDiscounts: tagDiscounts.reduce((acc, { tag, percentage }) => {
-          acc[`${tag}Percentage`] = percentage;
-          return acc;
-        }, {})
+        buyXGetY: buyXGetY,
+        tagDiscounts: tagDiscountObject
       };
 
+      // Check if metafield definition exists
+      const metafieldDefinition = await getMetafieldDefinition(query);
+      if (!metafieldDefinition) {
+        await createMetafieldDefinition(query);
+      }
+
+      // Save configuration to metafield
       await applyMetafieldChange({
-        type: 'updateMetafield',
-        namespace: 'awesome-discount',
-        key: 'tag-discount-config',
+        type: "updateMetafield",
+        namespace: "awesome-discount",
+        key: "tag-discount-config",
+        valueType: "json",
         value: JSON.stringify(configuration),
-        valueType: 'json',
       });
-      setError('');
+
+      return { status: "success" };
     } catch (error) {
       console.error('Error saving configuration:', error);
       setError('Failed to save configuration');
+      return { status: "fail", errors: [{ message: 'Failed to save configuration' }] };
     }
   };
 
   const availableTagOptions = availableTags
-    .filter(tag => !tagDiscounts.find(td => td.tag === tag))
+    .filter(tag => !tagDiscounts.find(td => td.tagName === tag))
     .map(tag => ({ label: tag, value: tag }));
 
   const totalTagDiscount = tagDiscounts.reduce((sum, td) => sum + td.percentage, 0);
@@ -223,22 +320,23 @@ function App() {
     <FunctionSettings onSave={handleSave}>
       <Form>
         <BlockStack gap="base">
-          {/* Volume Discount Section */}
-          <Card>
-            <VolumeDiscountInfo />
-          </Card>
-
+          {/* Buy X Get Y Discount Section */}
+          <BuyXGetYDiscountManager 
+            buyXGetY={buyXGetY} 
+            setBuyXGetY={setBuyXGetY} 
+          />
+        
           {/* Tag-based Discount Section */}
-          <Card>
+          <Box background="surface" border="base" borderRadius="base" padding="none">
             <BlockStack gap="base">
               <Box padding="base">
                 <BlockStack gap="base">
                   <Text variant="headingMd">Additional Tag-Based Discounts</Text>
                   <Banner>
-                    These discounts will be added on top of volume discounts.
+                    These discounts will be added on top of the Buy X Get Y discount.
                     Maximum additional discount per tag: {MAX_TAG_DISCOUNT}%
                   </Banner>
-
+                  
                   {error && (
                     <Banner tone="critical">{error}</Banner>
                   )}
@@ -247,20 +345,21 @@ function App() {
 
               {loading ? (
                 <Box padding="base">
-                  <InlineStack gap="base" align="center">
+                  <InlineStack gap="base">
                     <ProgressIndicator />
                     <Text>Loading tags...</Text>
                   </InlineStack>
                 </Box>
               ) : (
                 <BlockStack gap="none">
-                  {tagDiscounts.map(({ tag, percentage }) => (
+                  {tagDiscounts.map(({ id, tagName, percentage }) => (
                     <TagDiscountField
-                      key={tag}
-                      tag={tag}
-                      percentage={percentage}
-                      onPercentageChange={(newValue) => handlePercentageChange(tag, newValue)}
-                      onRemove={() => handleRemoveTag(tag)}
+                      key={id}
+                      tagId={id}
+                      tagName={tagName}
+                      percentage={percentage || 0}
+                      onPercentageChange={(newValue) => handlePercentageChange(id, newValue)}
+                      onRemove={() => handleRemoveTag(id)}
                     />
                   ))}
 
@@ -298,7 +397,7 @@ function App() {
                 </BlockStack>
               )}
             </BlockStack>
-          </Card>
+          </Box>
         </BlockStack>
       </Form>
     </FunctionSettings>
@@ -336,7 +435,8 @@ async function createMetafieldDefinition(adminApiQuery) {
             namespace: "awesome-discount"
             ownerType: DISCOUNT
             type: "json"
-            description: "Configuration for tag-based discount function"
+            description: "Configuration for tag-based discounts"
+            pin: true
           }
         ) {
           createdDefinition {
@@ -345,39 +445,21 @@ async function createMetafieldDefinition(adminApiQuery) {
           userErrors {
             field
             message
-            code
           }
         }
       }
     `);
-    console.log('Create metafield response:', response);
     
-    if (response.data?.metafieldDefinitionCreate?.userErrors?.length > 0) {
-      console.error('Errors creating metafield definition:', response.data.metafieldDefinitionCreate.userErrors);
+    const result = response.data?.metafieldDefinitionCreate;
+    if (result?.userErrors?.length > 0) {
+      console.error('Error creating metafield definition:', result.userErrors);
       return null;
     }
     
-    return response.data?.metafieldDefinitionCreate?.createdDefinition;
+    console.log('Created metafield definition:', result?.createdDefinition);
+    return result?.createdDefinition;
   } catch (error) {
     console.error('Error creating metafield definition:', error);
     return null;
   }
-}
-
-function calculateCombinedDiscount(discounts) {
-  if (discounts.length === 0) return 0;
-  
-  // Sort discounts in descending order
-  const sortedDiscounts = [...discounts].sort((a, b) => b - a);
-  
-  // Calculate combined discount with diminishing returns
-  let totalDiscount = 0;
-  sortedDiscounts.forEach((discount, index) => {
-    // First discount applies fully, subsequent discounts have diminishing effect
-    const factor = Math.pow(0.5, index); // Each subsequent discount is half as effective
-    totalDiscount += discount * factor;
-  });
-
-  // Cap at maximum allowed discount
-  return Math.min(totalDiscount, MAX_COMBINED_DISCOUNT);
 }
