@@ -1,0 +1,137 @@
+{
+  "name": "awesome-discount",
+  "handle": "",
+  "modules": [
+    {
+      "type": "function",
+      "handle": "product-discount-js",
+      "uid": "fa81b4ed-bcec-5f88-a70b-86526fcc8d6c876cc78a",
+      "assets": "fa81b4ed-bcec-5f88-a70b-86526fcc8d6c876cc78a",
+      "target": "purchase.product-discount.run",
+      "config": {
+        "title": "t:name",
+        "module_id": "fca648d9-a2f7-439c-9ec4-b0a45e63d475",
+        "description": "t:description",
+        "app_key": "68fab1d55b963fa24575f2795a182714",
+        "api_version": "2025-01",
+        "input_query_variables": {
+          "single_json_metafield": {
+            "namespace": "$app:example-discounts--ui-extension",
+            "key": "function-configuration"
+          }
+        },
+        "ui": {
+          "app_bridge": {
+            "details_path": "/",
+            "create_path": "/"
+          },
+          "ui_extension_handle": "product-discount-js-block"
+        },
+        "enable_creation_ui": true,
+        "localization": {
+          "default_locale": "en",
+          "translations": {
+            "en": "ewogICJuYW1lIjogInByb2R1Y3QtZGlzY291bnQtanMiLAogICJkZXNjcmlwdGlvbiI6ICJwcm9kdWN0LWRpc2NvdW50LWpzIgp9Cg=="
+          }
+        },
+        "targets": [
+          {
+            "handle": "purchase.product-discount.run",
+            "export": "run",
+            "input_query": "query RunInput($namespace: String!, $key: String!) {\n  cart {\n    lines {\n      quantity\n      merchandise {\n        __typename\n        ... on ProductVariant {\n          id\n        }\n      }\n    }\n    buyerIdentity {\n      customer {\n        id\n        hasAnyTag(tags: [\"VIP\", \"wholesale\"])\n        hasTags(tags: [\"VIP\", \"wholesale\"]) {\n          tag\n          hasTag\n        }\n        email\n        numberOfOrders\n        amountSpent {\n          amount\n          currencyCode\n        }\n      }\n    }\n  }\n  discountNode {\n    metafield(namespace: $namespace, key: $key) {\n      value\n    }\n  }\n}\n"
+          }
+        ]
+      }
+    },
+    {
+      "type": "ui_extension",
+      "handle": "product-discount-js-block",
+      "uid": "71308a61-3cdb-4b6e-56ad-79fff71133213345e288",
+      "assets": "71308a61-3cdb-4b6e-56ad-79fff71133213345e288",
+      "target": "admin.discount-details.function-settings.render",
+      "config": {
+        "api_version": "2024-10",
+        "extension_points": [
+          {
+            "target": "admin.discount-details.function-settings.render",
+            "module": "./src/DiscountFunctionSettings.jsx",
+            "metafields": [],
+            "urls": {},
+            "preloads": {},
+            "build_manifest": {
+              "assets": {
+                "main": {
+                  "filepath": "dist/product-discount-js-block.js",
+                  "module": "./src/DiscountFunctionSettings.jsx"
+                }
+              }
+            }
+          }
+        ],
+        "name": "t:name",
+        "description": "t:description",
+        "localization": {
+          "default_locale": "en",
+          "translations": {
+            "en": "ewogICJuYW1lIjogIkdIRiBBd2Vzb21lIERpc2NvdW50IiwKICAiZGVzY3JpcHRpb24iOiAiR0hGIEF3ZXNvbWUgRGlzY291bnQiLAogICJ0aXRsZSI6ICJEaXNjb3VudCB0aGF0IGFwcGxpZXMgdG8gcHJvZHVjdCwgb3JkZXIgYW5kIHNoaXBwaW5nIiwKICAibG9hZGluZyI6ICJMb2FkaW5nLi4uIiwKICAicGVyY2VudGFnZSI6IHsKICAgICJQcm9kdWN0IjogIlByb2R1Y3QgZGlzY291bnQiLAogICAgIk9yZGVyIjogIk9yZGVyIGRpc2NvdW50IiwKICAgICJTaGlwcGluZyI6ICJTaGlwcGluZyBkaXNjb3VudCIKICB9LAogICJjb2xsZWN0aW9ucyI6IHsKICAgICJidXR0b25MYWJlbCI6ICJDaG9vc2UgY29sbGVjdGlvbnMiLAogICAgImFsbFByb2R1Y3RzIjogIkFsbCBwcm9kdWN0cyIsCiAgICAiY29sbGVjdGlvbnMiOiAiQ29sbGVjdGlvbnMiLAogICAgImFwcGxpZXNUbyI6ICJBcHBsaWVzIHRvIgogIH0KfQ=="
+          }
+        }
+      }
+    },
+    {
+      "type": "app_access",
+      "handle": "app_access",
+      "uid": "app_access",
+      "assets": "app_access",
+      "target": "",
+      "config": {
+        "scopes": "read_customers,read_products,write_discounts",
+        "redirect_url_allowlist": [
+          "https://shopify.dev/apps/default-app-home/api/auth"
+        ]
+      }
+    },
+    {
+      "type": "webhooks",
+      "handle": "webhooks",
+      "uid": "webhooks",
+      "assets": "webhooks",
+      "target": "",
+      "config": {
+        "api_version": "2025-04"
+      }
+    },
+    {
+      "type": "point_of_sale",
+      "handle": "point_of_sale",
+      "uid": "point_of_sale",
+      "assets": "point_of_sale",
+      "target": "",
+      "config": {
+        "embedded": false
+      }
+    },
+    {
+      "type": "app_home",
+      "handle": "app_home",
+      "uid": "app_home",
+      "assets": "app_home",
+      "target": "",
+      "config": {
+        "app_url": "https://shopify.dev/apps/default-app-home",
+        "embedded": true
+      }
+    },
+    {
+      "type": "branding",
+      "handle": "branding",
+      "uid": "branding",
+      "assets": "branding",
+      "target": "",
+      "config": {
+        "name": "awesome-discount",
+        "app_handle": "awesome-discount"
+      }
+    }
+  ]
+}
